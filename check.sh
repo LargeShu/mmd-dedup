@@ -307,6 +307,30 @@ STRAY=$(find reports -newermt "-5 minutes" -name "inventory_*.csv" 2>/dev/null |
 [ "$STRAY" = "0" ] && ok "reports/ проекта не тронут" \
   || bad "гейт создал $STRAY файлов в reports/ проекта"
 
+step "11. Документация не ссылается на файлы вне репозитория"
+# У проекта есть локальные файлы (CONTRIBUTING.md, GITHUB_SETUP.md, LOCAL.md
+# и прочие) — они в .gitignore. Ссылка на них из отслеживаемого файла даёт
+# битую ссылку на GitHub, причём видит её только читатель, а не автор.
+if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then
+  DANGLING=0
+  for tracked in $(git ls-files '*.md'); do
+    # Только настоящие ссылки [текст](файл): именно они ломаются на GitHub.
+    # Упоминание файла в тексте — не ссылка, ничего не ломает, и запрещать
+    # его значило бы запретить объяснять, почему файл локальный.
+    for ref in $(grep -oE '\]\([A-Za-z0-9_.-]+\.(md|sh|py|json)\)' \
+                 "$tracked" 2>/dev/null | tr -d ']()'); do
+      [ -e "$ref" ] || continue                 # файла нет — не наша забота
+      git ls-files --error-unmatch "$ref" >/dev/null 2>&1 && continue
+      echo "  $tracked → $ref (файл вне репозитория)"
+      DANGLING=$((DANGLING+1))
+    done
+  done
+  [ "$DANGLING" = "0" ] && ok "ссылок на файлы вне репозитория нет" \
+    || bad "битых на GitHub ссылок: $DANGLING"
+else
+  echo "  не git-репозиторий — проверка ссылок пропущена"
+fi
+
 printf "\n"
 if [ "$FAIL" -eq 0 ]; then
   printf "\033[32m== QUALITY GATE ПРОЙДЕН ==\033[0m\n"

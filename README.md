@@ -606,10 +606,6 @@ copy config.example.json config.json
 Контроль качества: статический анализ, тесты, security review —
 в [QUALITY_GATE.md](QUALITY_GATE.md).
 
-Правила git: что не коммитить, ветки, требования к merge —
-в [CONTRIBUTING.md](CONTRIBUTING.md). Доступ к GitHub при включённой 2FA —
-в [GITHUB_SETUP.md](GITHUB_SETUP.md).
-
 ```bash
 python3 scripts/01_inventory.py --version   # версия у любого скрипта
 ./check.sh          # весь набор проверок, около минуты
@@ -623,8 +619,6 @@ python3 scripts/01_inventory.py --version   # версия у любого ск�
 ├── README.md                этот файл
 ├── ALGORITHM.md             как устроен поиск дубликатов
 ├── DEVELOPMENT.md           правила проекта и логика скриптов
-├── CONTRIBUTING.md          правила git: ветки, коммиты, merge
-├── GITHUB_SETUP.md          доступ к репозиторию, токен при 2FA (вне git)
 ├── QUALITY_GATE.md          проверки качества и security review
 ├── config.example.json      образец настроек
 ├── config.json              ваши пути (не в репозитории)
