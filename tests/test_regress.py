@@ -690,10 +690,13 @@ class TestApplySafety(unittest.TestCase):
         out = self.запуск("--move", "--quarantine", qr, "--verify-hash")
         self.assertIn("перенесено 2", out)
         self.assertFalse(os.path.exists(os.path.join(self.b, "f0.jpg")))
-        journal = os.path.join(qr, "journal.csv")
-        self.assertTrue(os.path.isfile(journal))
+        # Журнал лежит рядом с самим карантином, а карантин теперь свой
+        # у каждого диска. --undo принимает и папку целиком.
+        журналы = [os.path.join(к, "journal.csv")
+                   for к, _, ф in os.walk(qr) if "journal.csv" in ф]
+        self.assertTrue(журналы, "журнал не создан")
 
-        back = run("04_apply.py", "--undo", journal)
+        back = run("04_apply.py", "--undo", qr)
         self.assertIn("возвращено 2", back)
         self.assertTrue(os.path.exists(os.path.join(self.b, "f0.jpg")),
                         "файл не вернулся из карантина")
@@ -732,3 +735,62 @@ class TestByteProgress(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestQuarantineOnSameVolume(unittest.TestCase):
+    """
+    Карантин по умолчанию — на том же диске, где лежит файл.
+
+    Дефект: карантин создавался в каталоге проекта. У пользователя проект
+    на Mac, а архив на сетевом хранилище, и «перенос» превращался
+    в копирование 70 ГБ по сети. Внутри одного тома это переименование:
+    мгновенно и атомарно.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.photo = os.path.join(self.tmp, "photo")
+        self.other = os.path.join(self.tmp, "300")
+        os.makedirs(self.photo)
+        os.makedirs(self.other)
+
+    def tearDown(self):
+        import shutil as sh
+        sh.rmtree(self.tmp, ignore_errors=True)
+
+    def мод(self):
+        import importlib.util as u
+        sp = u.spec_from_file_location(
+            "apply4", os.path.join(SCRIPTS, "04_apply.py"))
+        m = u.module_from_spec(sp)
+        sp.loader.exec_module(m)
+        return m
+
+    def test_по_умолчанию_карантин_внутри_диска(self):
+        m = self.мод()
+        drives = {"photo": self.photo, "300photos": self.other}
+        bases = m.quarantine_bases(drives, None, "2026-01-01_00-00-00")
+        for имя, корень in drives.items():
+            self.assertTrue(
+                bases[имя].startswith(корень + os.sep),
+                f"карантин диска {имя} оказался вне самого диска: {bases[имя]}")
+
+    def test_карантин_на_том_же_томе(self):
+        m = self.мод()
+        drives = {"photo": self.photo}
+        bases = m.quarantine_bases(drives, None, "ts")
+        self.assertTrue(m.same_device(self.photo, bases["photo"]),
+                        "перенос стал бы копированием, а не переименованием")
+
+    def test_явная_папка_перекрывает_умолчание(self):
+        m = self.мод()
+        свой = os.path.join(self.tmp, "куда-то")
+        bases = m.quarantine_bases({"photo": self.photo}, свой, "ts")
+        self.assertTrue(bases["photo"].startswith(свой),
+                        "--quarantine должен оставаться рабочим")
+
+    def test_структура_внутри_диска_без_имени_диска(self):
+        m = self.мод()
+        src = os.path.join(self.photo, "2014", "a.jpg")
+        got = m.quarantine_path("/qr", src, self.photo)
+        self.assertEqual(got, os.path.join("/qr", "2014", "a.jpg"))

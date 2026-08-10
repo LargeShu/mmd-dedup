@@ -216,9 +216,23 @@ function matches(r, q) {
 
 function byMethod(r) { return method === 'all' || r.method === method; }
 
+// Строки, разложенные по папкам один раз при загрузке.
+//
+// Без индекса visibleRows фильтровала все 56 000 строк на КАЖДУЮ из 807 папок:
+// 45 миллионов сравнений на один пересчёт счётчиков. На тестовом стенде в два
+// десятка файлов это незаметно, на реальном архиве — заморозка вкладки.
+const ПО_ПАПКАМ = (() => {
+  const m = new Map();
+  for (const r of DATA.rows) {
+    if (!m.has(r.folder)) m.set(r.folder, []);
+    m.get(r.folder).push(r);
+  }
+  return m;
+})();
+
 function visibleRows(folder, q, onlyOpen) {
-  return DATA.rows.filter(r => r.folder === folder && byMethod(r) &&
-                               matches(r, q) && (!onlyOpen || !decided(r.rid)));
+  return (ПО_ПАПКАМ.get(folder) || []).filter(
+      r => byMethod(r) && matches(r, q) && (!onlyOpen || !decided(r.rid)));
 }
 
 function renderTabs() {
@@ -341,12 +355,23 @@ function rowInner(r) {
 // что стороны поменялись правильно.
 //
 // Теперь решённые строки остаются на месте до явного «скрыть решённые».
-function updateRow(rid) {
-  const r = DATA.rows.find(x => x.rid === rid);
+const ПО_RID = new Map(DATA.rows.map(r => [r.rid, r]));
+
+// Перерисовка строки БЕЗ пересчёта счётчиков.
+//
+// Разделение не косметическое: updateCounters обходит все папки, и вызов
+// его внутри цикла по тысяче строк даёт квадратичную работу — вкладка
+// зависала на «удалить всю папку». Счётчики считаются один раз, после цикла.
+function paintRow(rid) {
+  const r = ПО_RID.get(rid);
   const el = document.querySelector('.row[data-rid="' + rid + '"]');
   if (!r || !el) return;
   el.className = rowClasses(r);
   el.innerHTML = rowInner(r);
+}
+
+function updateRow(rid) {
+  paintRow(rid);
   updateCounters();
 }
 
@@ -364,11 +389,41 @@ function updateCounters() {
   });
 }
 
+function дублей(n) {
+  const d = n % 10, s = n % 100;
+  if (d === 1 && s !== 11) return n + ' дубль';
+  if (d >= 2 && d <= 4 && (s < 12 || s > 14)) return n + ' дубля';
+  return n + ' дублей';
+}
+
+// Пустая папка обязана объяснить, почему она пустая.
+//
+// «Нечего показывать» после массовой отметки читается как «всё пропало»:
+// пользователь только что нажал кнопку и не понимает, сработала она или
+// сломала отчёт. Причин пустоты ровно две, и они разные по смыслу —
+// разобрано и скрыто фильтром, либо не подошло под поиск.
+function пустаяПапка(el, folder, q) {
+  const всего = visibleRows(folder, q, false).length;
+  if (!всего) {
+    el.innerHTML = '<div class="empty">под текущий поиск в этой папке ' +
+                   'ничего не подходит</div>';
+    return;
+  }
+  el.innerHTML = '<div class="empty">' + дублей(всего) +
+    ' в этой папке разобраны — строки скрыты фильтром ' +
+    '«только неразобранные».<br><br>' +
+    '<button class="shownow">показать решённые</button></div>';
+  el.querySelector('.shownow').addEventListener('click', () => {
+    document.getElementById('onlyopen').checked = false;
+    renderFolders(true);
+  });
+}
+
 function renderFolderBody(el, folder) {
   const q = document.getElementById('q').value.trim();
   const onlyOpen = document.getElementById('onlyopen').checked;
   const rows = visibleRows(folder, q, onlyOpen);
-  if (!rows.length) { el.innerHTML = '<div class="empty">нечего показывать</div>'; return; }
+  if (!rows.length) { пустаяПапка(el, folder, q); return; }
   el.innerHTML = rows.map(r =>
       '<div class="' + rowClasses(r) + '" data-rid="' + r.rid + '">' +
       rowInner(r) + '</div>').join('');
@@ -481,9 +536,22 @@ function renderFolders(keepOpen) {
       const надо = rows.some(r => state[r.rid] !== значение);
       rows.forEach(r => setState(r.rid, надо ? значение : undefined));
       save();
-      // здесь меняются десятки строк разом — дешевле перерисовать папку
-      renderFolderBody(div.querySelector('.fbody'), folder);
+      // Строки обновляются НА МЕСТЕ, а не перерисовкой папки.
+      //
+      // Перерисовка при включённом «только неразобранные» опустошала папку
+      // целиком: тысяча строк исчезала разом, без объяснения. Пользователь
+      // не мог убедиться, что нажал именно то, что хотел, — а отменять
+      // приходилось вслепую. Правило то же, что для одиночных решений:
+      // решённое остаётся видимым до явного «скрыть решённые».
+      // Красим только строки, которые сейчас в DOM: остальные не видны,
+      // а обход тысячи отсутствующих узлов — та же лишняя работа.
+      div.querySelectorAll('.row[data-rid]').forEach(el =>
+          paintRow(el.dataset.rid));
       updateCounters();
+      flash(надо
+        ? (значение === УДАЛИТЬ ? 'отмечено к удалению: ' : 'оставлены обе: ') +
+          rows.length + ' — нажмите кнопку ещё раз, чтобы снять'
+        : 'решение снято с ' + rows.length + ' строк');
     };
     div.querySelector('.markall').addEventListener('click', массово(УДАЛИТЬ));
     div.querySelector('.keepall').addEventListener('click',

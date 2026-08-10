@@ -17,7 +17,7 @@
     python3 04_apply.py --decisions ... --move
 
     # 3. Если что-то не так — вернуть всё обратно
-    python3 04_apply.py --undo ../quarantine/2026-08-10_18-30/journal.csv
+    python3 04_apply.py --undo "/Volumes/photo/_MMD_quarantine/2026-08-10_18-30"
 
 Перед каждым файлом выполняются проверки, и при любой неудаче файл
 пропускается, а не «пробуется всё равно»:
@@ -29,7 +29,14 @@
   * файл лежит внутри одного из дисков из config.json
   * при --verify-hash содержимое дубля и оригинала совпадает побитово
 
-Журнал пишется в карантин: по нему работает --undo и видно, что произошло.
+КАРАНТИН СОЗДАЁТСЯ НА ТОМ ЖЕ ДИСКЕ, где лежит файл:
+<корень диска>/_MMD_quarantine/<дата-время>. Перенос внутри одной файловой
+системы — переименование: мгновенное и атомарное. Перенос между дисками —
+копирование, и для сетевого хранилища это часы трафика вместо секунд.
+
+Журнал пишется в карантин рядом с файлами: по нему работает --undo и видно,
+что произошло. Журналов столько, сколько задействовано дисков, поэтому
+--undo принимает и папку карантина целиком.
 """
 
 import argparse
@@ -38,6 +45,7 @@ import hashlib
 import json
 import os
 import shutil
+import stat
 import sys
 import time
 
@@ -45,6 +53,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mmdlib as L  # noqa: E402
 
 JOURNAL = "journal.csv"
+# Каталог карантина на самом диске. Имя латиницей и с подчёркиванием:
+# так он всплывает в начале списка в Finder и не спорит с кодировками
+# сетевых томов.
+QUARANTINE_DIRNAME = "_MMD_quarantine"
+
+# Начался ли перенос. Нужен для честного сообщения при Ctrl+C: обработчик
+# писал «уже перенесённые файлы остались в карантине» даже в предпросмотре,
+# где не тронут ни один файл. Пугать пользователя тем, чего не было, — тот же
+# класс дефекта, что и подсказка, обещающая не то действие.
+ПЕРЕНОС_НАЧАТ = False
 JOURNAL_COLS = ["время", "действие", "откуда", "куда", "байт", "sha256",
                 "оригинал", "метод"]
 
@@ -76,44 +94,76 @@ def load_decisions(path):
     return d, rows
 
 
-def inside_any(path, roots):
+def inside_any(p, real_roots):
     """Файл обязан лежать внутри настроенных дисков — защита от опечаток."""
-    p = os.path.realpath(path)
-    for r in roots:
-        r = os.path.realpath(r)
-        if p == r or p.startswith(r + os.sep):
-            return True
-    return False
+    return any(p == r or p.startswith(r + os.sep) for r in real_roots)
 
 
-def preflight(rows, roots, verify_hash=False):
+class РеальныеПути:
+    """
+    realpath с памятью.
+
+    На сетевом хранилище каждый realpath — обращение по сети, а в решениях
+    один и тот же оригинал повторяется десятками строк. Без запоминания
+    предпросмотр 2 700 решений уходил в минуты тишины: файлы не трогаются,
+    но каждый проверяется полудюжиной сетевых вызовов.
+    """
+
+    def __init__(self):
+        self._m = {}
+
+    def __call__(self, p):
+        r = self._m.get(p)
+        if r is None:
+            r = self._m[p] = os.path.realpath(p)
+        return r
+
+
+def preflight(rows, roots, verify_hash=False, quiet=False):
     """
     Проверяет каждое решение. Возвращает (годные, отклонённые).
 
     Отклонение — не ошибка выполнения, а причина не трогать файл.
     """
-    к_удалению = {os.path.realpath(r["путь"]) for r in rows}
+    real = РеальныеПути()
+    real_roots = [real(r) for r in roots]
+    к_удалению = {real(r["путь"]) for r in rows}
     годные, отклонённые = [], []
 
-    for r in rows:
+    # Проверка молчала минутами: пользователь видел «решений в файле: 2 690»
+    # и пустой экран. Работа идёт по сети, её темп неочевиден — значит,
+    # о ней надо сообщать.
+    всего = len(rows)
+    t0 = послед = time.time()
+    if not quiet:
+        print(f"проверка {всего:,} решений…", flush=True)
+
+    for i, r in enumerate(rows, 1):
         путь = r["путь"]
         оригинал = r.get("оставить")
         причина = None
 
-        if not inside_any(путь, roots):
+        # Одна stat вместо isfile + getsize: на сетевом диске это два
+        # обращения вместо одного, и на трёх тысячах файлов разница видна.
+        try:
+            st = os.stat(путь)
+        except OSError:
+            st = None
+
+        if not inside_any(real(путь), real_roots):
             причина = "вне настроенных дисков"
-        elif not os.path.isfile(путь):
+        elif st is None or not stat.S_ISREG(st.st_mode):
             причина = "файла нет или это не обычный файл"
-        elif r.get("байт") is not None and os.path.getsize(путь) != r["байт"]:
+        elif r.get("байт") is not None and st.st_size != r["байт"]:
             причина = (f"размер изменился: было {r['байт']:,}, "
-                       f"стало {os.path.getsize(путь):,}")
+                       f"стало {st.st_size:,}")
         elif not оригинал:
             причина = "не указан оригинал, который остаётся"
         elif not os.path.isfile(оригинал):
             причина = "ОРИГИНАЛ НЕ НАЙДЕН — удалять дубль нельзя"
-        elif os.path.realpath(оригинал) in к_удалению:
+        elif real(оригинал) in к_удалению:
             причина = "ОРИГИНАЛ ТОЖЕ ОТМЕЧЕН — удалили бы все копии"
-        elif os.path.realpath(оригинал) == os.path.realpath(путь):
+        elif real(оригинал) == real(путь):
             причина = "дубль и оригинал — один и тот же файл"
         else:
             try:
@@ -132,45 +182,127 @@ def preflight(rows, roots, verify_hash=False):
         (отклонённые if причина else годные).append(
             {**r, "причина": причина} if причина else r)
 
+        сейчас = time.time()
+        if not quiet and сейчас - послед >= 3 and i < всего:
+            послед = сейчас
+            темп = i / max(сейчас - t0, 0.001)
+            осталось = (всего - i) / темп if темп else 0
+            print(f"  проверено {i:,}/{всего:,} · {темп:.0f}/с · "
+                  f"осталось ~{L.dur(осталось)}", flush=True)
+
+    if not quiet:
+        print(f"  проверено {всего:,} за {L.dur(time.time() - t0)}", flush=True)
     return годные, отклонённые
 
 
-def quarantine_path(base, src, roots):
+def drive_of(path, drives):
+    """Имя диска из config.json, которому принадлежит файл, и его корень."""
+    real = os.path.realpath(path)
+    for имя, корень in drives.items():
+        rr = os.path.realpath(корень)
+        if real == rr or real.startswith(rr + os.sep):
+            return имя, rr
+    return None, None
+
+
+def quarantine_bases(drives, arg, stamp):
     """
-    Внутри карантина сохраняется структура: <карантин>/<диск>/<путь/внутри>.
+    Карантин по умолчанию — НА ТОМ ЖЕ ДИСКЕ, где лежит файл.
+
+    Причина не в удобстве. Перемещение внутри одной файловой системы —
+    переименование: мгновенное и атомарное, файл в любой момент существует
+    либо там, либо там. Перемещение между дисками — копирование с последующим
+    удалением: для сетевого хранилища это часы трафика, а обрыв посреди
+    копирования оставляет файл в неопределённом состоянии.
+
+    На архиве в 70 ГБ разница между этими двумя вариантами — секунды против
+    часов, и целостность против надежды.
+
+    --quarantine ПАПКА сохраняет старое поведение: всё в один каталог. Это
+    осмысленно, когда карантин намеренно уносят на другой носитель.
+    """
+    if arg:
+        return {имя: os.path.join(arg, имя) for имя in drives}
+    return {имя: os.path.join(корень, QUARANTINE_DIRNAME, stamp)
+            for имя, корень in drives.items()}
+
+
+def same_device(src, dst):
+    """
+    Один ли том. Сравниваем st_dev ближайшего существующего предка
+    назначения: самого каталога карантина ещё нет.
+    """
+    предок = os.path.dirname(os.path.abspath(dst))
+    while предок and not os.path.exists(предок):
+        выше = os.path.dirname(предок)
+        if выше == предок:
+            break
+        предок = выше
+    try:
+        return os.stat(src).st_dev == os.stat(предок).st_dev
+    except OSError:
+        return False
+
+
+def quarantine_path(base, src, корень):
+    """
+    Внутри карантина сохраняется структура диска: <карантин>/<путь/внутри>.
 
     Плоская свалка сделала бы возврат невозможным и склеила бы одноимённые
     файлы из разных папок.
     """
     real = os.path.realpath(src)
-    for r in roots:
-        rr = os.path.realpath(r)
-        if real == rr or real.startswith(rr + os.sep):
-            rel = os.path.relpath(real, rr)
-            return os.path.join(base, os.path.basename(rr.rstrip(os.sep)), rel)
-    return os.path.join(base, "прочее", os.path.basename(real))
+    return os.path.join(base, os.path.relpath(real, корень))
 
 
-def apply_move(годные, base, roots, verify_hash, quiet=False):
-    os.makedirs(base, exist_ok=True)
-    jpath = os.path.join(base, JOURNAL)
-    новый = not os.path.exists(jpath)
+def apply_move(годные, bases, drives, verify_hash, quiet=False):
+    """
+    Переносит файлы, по журналу на каждый диск.
+
+    Журнал лежит рядом с самим карантином намеренно: карантин и запись о том,
+    откуда что взято, должны переезжать и удаляться вместе. Журнал в проекте
+    отдельно от файлов на NAS — верный способ однажды остаться с папкой
+    непонятного содержимого.
+    """
+    global ПЕРЕНОС_НАЧАТ
+    ПЕРЕНОС_НАЧАТ = True
+    журналы = {}
+    файлы = {}
     перенесено = ошибок = 0
     байт = 0
     t0 = time.time()
 
-    with open(jpath, "a", newline="", encoding="utf-8-sig") as jf:
-        w = csv.writer(jf, delimiter=";")
-        if новый:
-            w.writerow(JOURNAL_COLS)
+    try:
         for i, r in enumerate(годные, 1):
             src = r["путь"]
-            dst = quarantine_path(base, src, roots)
+            имя_диска, корень = drive_of(src, drives)
+            if имя_диска is None:          # preflight такое уже отсеял
+                ошибок += 1
+                print(f"  ! вне настроенных дисков, пропуск: {src}")
+                continue
+            base = bases[имя_диска]
+            if имя_диска not in журналы:
+                os.makedirs(base, exist_ok=True)
+                jpath = os.path.join(base, JOURNAL)
+                новый = not os.path.exists(jpath)
+                # ruff: контекстный менеджер тут не годится — журналов
+                # столько, сколько дисков, и живут они до конца цикла.
+                # Закрываются в finally ниже.
+                jf = open(jpath, "a", newline="",  # noqa: SIM115
+                          encoding="utf-8-sig")
+                файлы[имя_диска] = jf
+                журналы[имя_диска] = (csv.writer(jf, delimiter=";"), jpath)
+                if новый:
+                    журналы[имя_диска][0].writerow(JOURNAL_COLS)
+            w, jpath = журналы[имя_диска]
+            jf = файлы[имя_диска]
+
+            dst = quarantine_path(base, src, корень)
             try:
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 if os.path.exists(dst):
-                    корень, расш = os.path.splitext(dst)
-                    dst = f"{корень}__{r.get('id', i)}{расш}"
+                    без_расш, расш = os.path.splitext(dst)
+                    dst = f"{без_расш}__{r.get('id', i)}{расш}"
                 h = sha256(src) if verify_hash else ""
                 размер = os.path.getsize(src)
                 shutil.move(src, dst)
@@ -186,13 +318,47 @@ def apply_move(годные, base, roots, verify_hash, quiet=False):
                 print(f"  ! не удалось перенести {src}: {e}")
             if not quiet and i % 200 == 0:
                 print(f"  перенесено {i:,}/{len(годные):,}", flush=True)
+    finally:
+        for jf in файлы.values():
+            jf.close()
 
-    return перенесено, ошибок, байт, time.time() - t0, jpath
+    пути = [jpath for _, jpath in журналы.values()]
+    return перенесено, ошибок, байт, time.time() - t0, пути
+
+
+def найти_журналы(путь):
+    """
+    --undo принимает и журнал, и папку карантина.
+
+    Журналов теперь столько, сколько дисков: карантин у каждого свой.
+    Требовать от человека перечислить их вручную — значит подталкивать
+    к тому, чтобы один из них забыли, а файлы остались в карантине.
+    """
+    if os.path.isfile(путь):
+        return [путь]
+    if os.path.isdir(путь):
+        найдено = []
+        for корень, _, файлы in os.walk(путь):
+            if JOURNAL in файлы:
+                найдено.append(os.path.join(корень, JOURNAL))
+        return sorted(найдено)
+    return []
 
 
 def undo(journal, quiet=False):
-    if not os.path.isfile(journal):
+    журналы = найти_журналы(journal)
+    if not журналы:
         raise SystemExit(f"журнал не найден: {journal}")
+    if len(журналы) > 1:
+        print(f"журналов найдено: {len(журналы)}")
+        всего_в = всего_ош = 0
+        for j in журналы:
+            в, ош = undo(j, quiet)
+            всего_в += в
+            всего_ош += ош
+        print(f"\nИТОГО возвращено {всего_в:,}, не удалось {всего_ош:,}")
+        return всего_в, всего_ош
+    journal = журналы[0]
     with open(journal, encoding="utf-8-sig") as fh:
         rows = [r for r in csv.DictReader(fh, delimiter=";")
                 if r.get("действие") == "перенесён"]
@@ -224,11 +390,14 @@ def undo(journal, quiet=False):
     return вернулось, ошибок
 
 
-def печать_плана(годные, отклонённые, base, verify_hash):
+def печать_плана(годные, отклонённые, bases, drives, verify_hash):
     байт = sum(r.get("байт") or 0 for r in годные)
     по_методам = {}
+    по_дискам = {}
     for r in годные:
         по_методам[r.get("метод", "?")] = по_методам.get(r.get("метод", "?"), 0) + 1
+        имя, _ = drive_of(r["путь"], drives)
+        по_дискам[имя] = по_дискам.get(имя, 0) + 1
 
     print("\n" + "=" * 66)
     print("ПЛАН")
@@ -237,8 +406,25 @@ def печать_плана(годные, отклонённые, base, verify_h
     for м, n in sorted(по_методам.items()):
         print(f"      {м:<8} {n:,}")
     print(f"  отклонено  : {len(отклонённые):,}")
-    print(f"  карантин   : {base}")
     print(f"  сверка хешей: {'да' if verify_hash else 'нет (быстрее)'}")
+    print("\n  КАРАНТИН:")
+    for имя in sorted(по_дискам):
+        if имя is None:
+            continue
+        base = bases[имя]
+        свой = same_device(drives[имя], base)
+        print(f"      {имя}: {base}")
+        print(f"         {по_дискам[имя]:,} файлов · " +
+              ("тот же том — перенос мгновенный"
+               if свой else
+               "ДРУГОЙ ТОМ — копирование, на сетевом диске это долго"))
+    if any(имя is not None and not same_device(drives[имя], bases[имя])
+           for имя in по_дискам):
+        print("\n  Карантин на другом томе означает копирование каждого файла")
+        print("  целиком. Для сетевого хранилища это часы вместо секунд,")
+        print("  а обрыв связи посреди копирования оставляет файл")
+        print("  в неопределённом состоянии. Уберите --quarantine, чтобы")
+        print("  карантин создавался на самих дисках.")
 
     if отклонённые:
         причины = {}
@@ -267,8 +453,10 @@ def main():
     ap.add_argument("--decisions", metavar="ФАЙЛ",
                     help="JSON из кнопки «Скачать решения» в decision.html")
     ap.add_argument("--quarantine", metavar="ПАПКА",
-                    help="куда переносить; по умолчанию "
-                         "<проект>/quarantine/<дата-время>")
+                    help="ОДИН каталог для всех дисков. По умолчанию карантин "
+                         "создаётся НА КАЖДОМ ДИСКЕ: <корень>/"
+                         + QUARANTINE_DIRNAME + "/<дата-время> — так перенос "
+                         "остаётся переименованием, а не копированием по сети")
     ap.add_argument("--move", action="store_true",
                     help="выполнить перенос. Без этого флага — только план")
     ap.add_argument("--verify-hash", action="store_true",
@@ -288,7 +476,8 @@ def main():
         ap.error("нужен --decisions ФАЙЛ (или --undo ЖУРНАЛ)")
 
     cfg = L.load_config(required=not a.root)
-    roots = list(L.merge_roots(cfg["drives"], a.root).values())
+    drives = L.merge_roots(cfg["drives"], a.root)
+    roots = list(drives.values())
     if not roots:
         raise SystemExit("не задано ни одного диска")
 
@@ -296,11 +485,11 @@ def main():
     print(f"решений в файле: {len(rows):,}")
     print(f"отчёт: {d.get('отчёт', '?')}, сохранено {d.get('сохранено', '?')}")
 
-    годные, отклонённые = preflight(rows, roots, a.verify_hash)
+    годные, отклонённые = preflight(rows, roots, a.verify_hash, a.quiet)
 
-    base = a.quarantine or os.path.join(
-        L.project_dir(), "quarantine", time.strftime("%Y-%m-%d_%H-%M-%S"))
-    печать_плана(годные, отклонённые, base, a.verify_hash)
+    stamp = time.strftime("%Y-%m-%d_%H-%M-%S")
+    bases = quarantine_bases(drives, a.quarantine, stamp)
+    печать_плана(годные, отклонённые, bases, drives, a.verify_hash)
 
     if not a.move:
         print("\n" + "-" * 66)
@@ -315,21 +504,26 @@ def main():
 
     print("\n" + "-" * 66)
     print(f"ПЕРЕНОС {len(годные):,} файлов в карантин…")
-    n, err, байт, сек, jpath = apply_move(годные, base, roots, a.verify_hash,
-                                          a.quiet)
+    n, err, байт, сек, журналы = apply_move(годные, bases, drives,
+                                            a.verify_hash, a.quiet)
     print(f"\nперенесено {n:,} файлов, {L.human(байт)}, за {L.dur(сек)}")
     if err:
         print(f"не удалось перенести: {err:,}")
-    print(f"журнал: {jpath}")
+    for j in журналы:
+        print(f"журнал: {j}")
     print("\nФайлы НЕ УДАЛЕНЫ, а лежат в карантине.")
     print("Проверьте, что ничего нужного не пропало, и удалите папку карантина")
     print("обычным способом. Вернуть обратно:")
-    print(f"  python3 04_apply.py --undo {jpath}")
+    for j in журналы:
+        print(f"  python3 04_apply.py --undo {j}")
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-        print("\nпрервано; уже перенесённые файлы остались в карантине, "
-              "журнал цел")
+        if ПЕРЕНОС_НАЧАТ:
+            print("\nпрервано; уже перенесённые файлы остались в карантине, "
+                  "журнал цел")
+        else:
+            print("\nпрервано; НИ ОДИН ФАЙЛ НЕ ТРОНУТ — шла только проверка")
