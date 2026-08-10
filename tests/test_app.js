@@ -110,6 +110,49 @@ setState(rid, undefined);
   base('C:\\\\a\\\\b\\\\x.jpg') === 'x.jpg' &&
   base('/a/b/y.jpg') === 'y.jpg');
 
+// ---------- цена массовой операции
+//
+// Заморозка вкладки на «удалить всю папку» случилась из-за того, что
+// перерисовка строки тянула за собой пересчёт счётчиков: тысяча строк —
+// тысяча обходов всех папок. Тест закрепляет разделение.
+Object.keys(state).forEach(k => delete state[k]);
+setState(DATA.rows[0].rid, УДАЛИТЬ);
+stats();
+const счётчикДо = document.getElementById('st_marked').textContent;
+setState(DATA.rows[1].rid, УДАЛИТЬ);
+paintRow(DATA.rows[1].rid);
+проверить('перерисовка строки не пересчитывает счётчики',
+  document.getElementById('st_marked').textContent === счётчикДо,
+  'иначе массовая операция даёт квадратичную работу и вешает вкладку');
+updateRow(DATA.rows[1].rid);
+проверить('updateRow счётчики всё же обновляет',
+  document.getElementById('st_marked').textContent !== счётчикДо);
+Object.keys(state).forEach(k => delete state[k]);
+
+проверить('индекс по папкам совпадает с прямым перебором',
+  DATA.folders.every(f => visibleRows(f.f, '', false).length ===
+    DATA.rows.filter(r => r.folder === f.f && byMethod(r)).length),
+  'индекс вводился ради скорости и не должен менять результат');
+
+// ---------- пустая папка объясняет причину
+const папка = DATA.folders[0].f;
+const короб = { innerHTML: '', querySelector: () => ({ addEventListener() {} }) };
+пустаяПапка(короб, папка, '');
+проверить('пустая папка объясняет, что строки скрыты фильтром',
+  короб.innerHTML.includes('скрыты фильтром'),
+  '«нечего показывать» после массовой отметки читается как «всё пропало»');
+проверить('пустая папка предлагает показать решённые',
+  короб.innerHTML.includes('показать решённые'));
+пустаяПапка(короб, папка, 'заведомо-ненайдётся-zzz');
+проверить('пустой поиск объясняется иначе, чем разобранная папка',
+  короб.innerHTML.includes('поиск') &&
+  !короб.innerHTML.includes('скрыты фильтром'));
+
+проверить('склонение «дубль» по-русски',
+  дублей(1).endsWith('дубль') && дублей(2).endsWith('дубля') &&
+  дублей(5).endsWith('дублей') && дублей(11).endsWith('дублей') &&
+  дублей(21).endsWith('дубль') && дублей(112).endsWith('дублей'));
+
 // ---------- экспорт
 const дубль = DATA.rows.find(r => !DATA.rows.some(
   x => x !== r && x.dup.p === r.keep.p));
