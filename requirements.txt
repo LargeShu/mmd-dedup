@@ -1,0 +1,10 @@
+# Зависимости ставятся ТОЛЬКО в venv проекта (../.venv), в системный Python — никогда.
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements.txt
+#
+# Все три библиотеки опциональны: без них работают этап 1 целиком,
+# этап 2 --stage exact и этап 3. Отваливаются только EXIF и pHash.
+
+pillow>=10.0        # чтение размеров и EXIF, декодирование для pHash
+pillow-heif>=0.13   # поддержка HEIC/HEIF (файлы с iPhone)
+imagehash>=4.3      # perceptual hash; тянет numpy, scipy, PyWavelets (~150 МБ)
