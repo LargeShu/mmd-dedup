@@ -26,6 +26,9 @@ button.primary { background: #2d6cdf; color: #fff; border-color: #2d6cdf }
 button.primary:hover { background: #245ec5 }
 label.chk { display: flex; align-items: center; gap: 6px; cursor: pointer;
             user-select: none; white-space: nowrap }
+select { font: 13px inherit; padding: 5px 8px; border: 1px solid #ccc;
+         border-radius: 6px; background: #fff }
+#sortdir { min-width: 34px; font-size: 15px; line-height: 1 }
 .stats { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 8px;
          font-size: 13px; color: #555 }
 .stats b { color: #1a1a1a; font-size: 15px }
@@ -235,6 +238,102 @@ function visibleRows(folder, q, onlyOpen) {
       r => byMethod(r) && matches(r, q) && (!onlyOpen || !decided(r.rid)));
 }
 
+// ---------------------------------------------------------------- сортировка
+//
+// Задача выбора «с чего начать» — планирование под ограниченным ресурсом:
+// времени и внимания у человека конечное количество. Жадное правило, дающее
+// наибольший результат к любому моменту, — сортировка по отношению
+// «выгода / стоимость» (правило Смита в теории расписаний), а не по
+// абсолютной выгоде.
+//
+// Стоимость решений здесь РАЗНАЯ, и это важнее, чем кажется. Папка точных
+// копий снимается одним нажатием «удалить всю папку» — сколько бы в ней ни
+// было строк. Папку с похожими надо смотреть глазами построчно. Поэтому
+// 1012 точных копий на 9.3 ГБ стоят одного решения, а пять похожих
+// на 200 МБ — пяти. По абсолютному размеру они встали бы в правильном
+// порядке случайно, а не по существу.
+function метрики(folder, q) {
+  const rows = visibleRows(folder, q, false);
+  let байтВсего = 0, байтОстаток = 0, нерешено = 0;
+  let естьExact = false, прочих = 0;
+  for (const r of rows) {
+    байтВсего += r.size;
+    if (!decided(r.rid)) {
+      байтОстаток += r.size;
+      нерешено++;
+      if (r.method === 'exact') естьExact = true; else прочих++;
+    }
+  }
+  // Стоимость в «решениях»: вся exact-часть папки — одно нажатие.
+  const стоимость = (естьExact ? 1 : 0) + прочих;
+  return {
+    всего: rows.length, байтВсего, байтОстаток, нерешено, стоимость,
+    выгода: стоимость ? байтОстаток / стоимость : 0,
+  };
+}
+
+const СОРТИРОВКИ = {
+  выгода:   {имя: 'выгода за решение', как: м => м.выгода},
+  остаток:  {имя: 'неразобранный объём', как: м => м.байтОстаток},
+  объём:    {имя: 'общий объём', как: м => м.байтВсего},
+  нерешено: {имя: 'неразобранных строк', как: м => м.нерешено},
+  дубли:    {имя: 'всего дублей', как: м => м.всего},
+  путь:     {имя: 'путь', как: null},
+};
+let sortKey = 'выгода';
+let sortDir = -1;                    // -1 — по убыванию, 1 — по возрастанию
+
+// Порядок папок — СНИМОК, а не живая величина.
+//
+// Если пересчитывать его после каждого решения, список плывёт под руками:
+// отметил строку — папки перескочили, место потеряно. Порядок обновляется
+// только по явному действию: смена сортировки, поиск, вкладка метода,
+// кнопка «пересортировать».
+let порядок = new Map();
+
+function пересортировать() {
+  const q = document.getElementById('q').value.trim();
+  const имена = DATA.folders.map(f => f.f);
+  let список;
+  if (sortKey === 'путь') {
+    список = имена.slice().sort((a, b) => a.localeCompare(b, 'ru'));
+    if (sortDir < 0) список.reverse();
+  } else {
+    const как = СОРТИРОВКИ[sortKey].как;
+    const вес = new Map(имена.map(n => [n, как(метрики(n, q))]));
+    // Ничья разрешается путём: иначе порядок равных папок скачет
+    // между перерисовками без всякой причины.
+    список = имена.slice().sort((a, b) =>
+      (вес.get(b) - вес.get(a)) * (sortDir < 0 ? 1 : -1) ||
+      a.localeCompare(b, 'ru'));
+  }
+  порядок = new Map(список.map((n, i) => [n, i]));
+}
+
+function сохранитьВид() {
+  try {
+    localStorage.setItem(KEY + ':вид', JSON.stringify({sortKey, sortDir}));
+  } catch (e) { /* приватный режим — не беда, порядок не данные */ }
+}
+
+function загрузитьВид() {
+  try {
+    const v = JSON.parse(localStorage.getItem(KEY + ':вид') || '{}');
+    if (СОРТИРОВКИ[v.sortKey]) sortKey = v.sortKey;
+    if (v.sortDir === 1 || v.sortDir === -1) sortDir = v.sortDir;
+  } catch (e) { /* оставляем умолчание */ }
+}
+
+function renderSort() {
+  const sel = document.getElementById('sort');
+  sel.innerHTML = Object.keys(СОРТИРОВКИ).map(k =>
+    '<option value="' + k + '"' + (k === sortKey ? ' selected' : '') + '>' +
+    СОРТИРОВКИ[k].имя + '</option>').join('');
+  document.getElementById('sortdir').textContent = sortDir < 0 ? '↓' : '↑';
+  document.getElementById('sortdir').title =
+      sortDir < 0 ? 'сначала большие' : 'сначала малые';
+}
+
 function renderTabs() {
   const счёт = {all: DATA.rows.length};
   for (const r of DATA.rows) счёт[r.method] = (счёт[r.method] || 0) + 1;
@@ -250,6 +349,7 @@ function renderTabs() {
     b.addEventListener('click', () => {
       method = b.dataset.m;
       renderTabs();
+      пересортировать();     // состав папок изменился — порядок тоже
       renderFolders(true);
     });
   });
@@ -482,10 +582,13 @@ function renderFolders(keepOpen) {
   const q = document.getElementById('q').value.trim();
   const onlyOpen = document.getElementById('onlyopen').checked;
   const main = document.getElementById('list');
+  if (!порядок.size) пересортировать();
   const items = DATA.folders.filter(f => {
     const rows = visibleRows(f.f, q, onlyOpen);
     return rows.length > 0;
-  });
+  // Папки, которых нет в снимке (появились после смены вкладки), уходят
+  // в конец, а не пропадают и не перемешивают остальных.
+  }).sort((a, b) => (порядок.get(a.f) ?? 1e9) - (порядок.get(b.f) ?? 1e9));
   if (!items.length) {
     main.innerHTML = '<div class="empty">Ничего не найдено. ' +
         'Снимите фильтр или измените запрос.</div>';
@@ -496,12 +599,17 @@ function renderFolders(keepOpen) {
     const left = rows.filter(r => !decided(r.rid)).length;
     const bytes = rows.reduce((a, r) => a + r.size, 0);
     const open = keepOpen && openFolders.has(f.f);
+    // Величину, по которой отсортировано, показываем рядом: иначе порядок
+    // выглядит произвольным, а «выгоду за решение» не угадать глазами.
+    const м = метрики(f.f, q);
+    const подпись = sortKey === 'выгода' && м.выгода
+        ? ' · ' + human(м.выгода) + '/решение' : '';
     return '<div class="folder' + (open ? ' open' : '') + '" data-f="' +
         esc(f.f) + '">' +
       '<div class="fhead"><span class="arrow">▶</span>' +
       '<span class="name">' + esc(f.f) + '</span>' +
       '<span class="meta">' + rows.length + ' дубл. · ' + human(bytes) +
-      ' · не решено ' + left + '</span>' +
+      ' · не решено ' + left + подпись + '</span>' +
       '<button class="copypath" title="скопировать путь к папке">путь</button>' +
       '<button class="markall">удалить всю папку</button>' +
       '<button class="keepall" title="осознанно оставить обе копии для всей папки">' +
@@ -606,11 +714,36 @@ function importJson(file) {
 
 document.addEventListener('DOMContentLoaded', () => {
   load();
+  загрузитьВид();
   stats();
+  renderSort();
   renderTabs();
+  пересортировать();
   renderFolders(false);
-  document.getElementById('q').addEventListener('input',
-      () => renderFolders(true));
+  // Поиск меняет состав папок — порядок пересчитывается вместе с ним.
+  document.getElementById('q').addEventListener('input', () => {
+    пересортировать();
+    renderFolders(true);
+  });
+  document.getElementById('sort').addEventListener('change', ev => {
+    sortKey = ev.target.value;
+    сохранитьВид();
+    renderSort();
+    пересортировать();
+    renderFolders(true);
+  });
+  document.getElementById('sortdir').addEventListener('click', () => {
+    sortDir = -sortDir;
+    сохранитьВид();
+    renderSort();
+    пересортировать();
+    renderFolders(true);
+  });
+  document.getElementById('resort').addEventListener('click', () => {
+    пересортировать();
+    renderFolders(true);
+    flash('порядок пересчитан');
+  });
   document.getElementById('onlyopen').addEventListener('change',
       () => renderFolders(true));
   document.getElementById('export').addEventListener('click', exportJson);
@@ -639,6 +772,10 @@ BODY = """
     <input type="search" id="q" placeholder="поиск по пути или имени файла">
     <label class="chk"><input type="checkbox" id="onlyopen" checked>
       только неразобранные</label>
+    <label class="chk" title="чем сортировать папки">сначала:
+      <select id="sort"></select></label>
+    <button id="sortdir" title="направление">↓</button>
+    <button id="resort" title="пересчитать порядок по текущим решениям">пересортировать</button>
     <button id="hidedone">скрыть решённые</button>
     <button id="expand">развернуть всё</button>
     <button id="collapse">свернуть всё</button>

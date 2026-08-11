@@ -786,10 +786,12 @@ def main():
     if not rts:
         print("в базе нет корней — сначала запустите 01_inventory.py")
         return
-    for k, v in rts.items():
-        if not os.path.isdir(v):
-            print(f"!! диск не смонтирован: {k} -> {v}")
-            return
+    # isdir мало: непримонтированная шара выглядит как пустая локальная папка,
+    # и этап 2 честно посчитал бы отпечатки нуля файлов.
+    # Этап 2 только читает: пустой диск здесь — повод предупредить,
+    # а не отказать.
+    if not L.сообщить_о_дисках(rts):
+        return
 
     log_path = a.log or os.path.join(here, "..", "reports", "signatures_log.csv")
     t0 = time.time()
