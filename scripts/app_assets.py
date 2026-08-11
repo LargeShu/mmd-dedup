@@ -191,6 +191,30 @@ function keeperUsedBy(path, exceptRid) {
                                state[r.rid] !== ОСТАВИТЬ_ОБЕ).length;
 }
 
+// Кто исчезнет по этой строке. Одна функция на весь отчёт: подсказка,
+// предупреждение и экспорт обязаны отвечать одинаково.
+function жертва(r) {
+  return swapped(r.rid) ? r.keep : r.dup;
+}
+
+// Предупреждение о потере последней копии.
+//
+// Файл, стоящий здесь как «ОСТАВИТЬ», в другой папке может быть строкой
+// «УДАЛИТЬ» — и наоборот. Отметив обе строки, человек уносит в карантин
+// все копии кадра. 04_apply такую пару отклонит («ОРИГИНАЛ ТОЖЕ ОТМЕЧЕН»),
+// но узнать об этом на сотне решений постфактум — плохая замена
+// предупреждению в тот момент, когда решение принимается.
+function предупредитьОПоследнейКопии(rid) {
+  const r = ПО_RID.get(rid);
+  if (!r) return;
+  const уйдёт = жертва(r);
+  const сколько = keeperUsedBy(уйдёт.p, rid);
+  if (сколько) {
+    flash('осторожно: ' + base(уйдёт.p) + ' — оригинал ещё для ' + сколько +
+          ' строк. Если отметить и их, кадр исчезнет целиком', true);
+  }
+}
+
 function setState(rid, v) {
   if (v === undefined) delete state[rid]; else state[rid] = v;
 }
@@ -430,9 +454,16 @@ function base(p) {
 // когда пользователь и так неуверен. Цена ошибки здесь — потерянный снимок,
 // поэтому текст собирается из состояния строки и всегда содержит имя файла.
 function hintDelete(r) {
-  const жертва = swapped(r.rid) ? r.dup : r.keep;
-  return (swapped(r.rid) ? 'отметить к удалению ЛЕВЫЙ файл: '
-                         : 'отметить к удалению правый файл: ') + base(жертва.p);
+  // Кто исчезнет: без переворота — r.dup (рисуется СЛЕВА как «удалить»),
+  // после переворота — r.keep (уезжает ВПРАВО). Это же различие управляет
+  // экспортом, и подсказка обязана следовать за ним, а не за интуицией.
+  const жертва = swapped(r.rid) ? r.keep : r.dup;
+  const сторона = swapped(r.rid) ? 'ПРАВЫЙ' : 'левый';
+  if (decided(r.rid) && !keepBoth(r.rid)) {
+    return 'снять решение (сейчас удаляется ' + сторона.toLowerCase() +
+           ': ' + base(жертва.p) + ')';
+  }
+  return 'отметить к удалению ' + сторона + ' файл: ' + base(жертва.p);
 }
 
 function hintSwap(r) {
@@ -444,8 +475,11 @@ function hintSwap(r) {
 
 function rowInner(r) {
   return '<div class="act">' +
+      // Переворот ТОЖЕ приводит к удалению — значит флажок обязан стоять.
+      // Иначе строка молча удаляет файл при снятой галке: расхождение
+      // между тем, что видно, и тем, что произойдёт.
       '<input type="checkbox" title="' + esc(hintDelete(r)) + '"' +
-      (toDelete(r.rid) ? ' checked' : '') + '>' +
+      (toDelete(r.rid) || swapped(r.rid) ? ' checked' : '') + '>' +
       '<button class="keepboth" title="осознанно оставить обе копии">' +
       (keepBoth(r.rid) ? 'обе ✓' : 'обе') + '</button>' +
       '<button class="swap" title="' + esc(hintSwap(r)) + '">' +
@@ -565,15 +599,8 @@ function bindBody(el) {
       // повторное нажатие снимает решение — передумать можно всегда
       setState(rid, keepBoth(rid) ? undefined : ОСТАВИТЬ_ОБЕ);
     } else if (b.classList.contains('swap')) {
-      if (!swapped(rid)) {
-        const r = DATA.rows.find(x => x.rid === rid);
-        const сколько = keeperUsedBy(r.keep.p, rid);
-        if (сколько) {
-          flash('осторожно: этот файл — оригинал ещё для ' + сколько +
-                ' строк; разберите их тоже', true);
-        }
-      }
       setState(rid, swapped(rid) ? undefined : НАОБОРОТ);
+      if (swapped(rid)) предупредитьОПоследнейКопии(rid);
     } else {
       return;
     }
@@ -587,6 +614,7 @@ function bindBody(el) {
     if (!row) return;
     const rid = row.dataset.rid;
     setState(rid, ev.target.checked ? УДАЛИТЬ : undefined);
+    if (ev.target.checked) предупредитьОПоследнейКопии(rid);
     save();
     updateRow(rid);
   });
@@ -657,6 +685,16 @@ function renderFolders(keepOpen) {
                                false);
       const надо = rows.some(r => state[r.rid] !== значение);
       rows.forEach(r => setState(r.rid, надо ? значение : undefined));
+      if (надо && значение === УДАЛИТЬ) {
+        // На папке предупреждаем ОДИН раз с числом: сто всплывающих
+        // сообщений подряд не читают, их закрывают.
+        const опасных = rows.filter(
+            r => keeperUsedBy(жертва(r).p, r.rid)).length;
+        if (опасных) {
+          flash('осторожно: в ' + опасных + ' строках удаляемый файл — ' +
+                'оригинал для других строк; проверьте их', true);
+        }
+      }
       save();
       // Строки обновляются НА МЕСТЕ, а не перерисовкой папки.
       //
