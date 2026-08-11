@@ -942,3 +942,89 @@ class TestMountCheck(unittest.TestCase):
         self.assertIn("ДИСКИ НЕ ГОТОВЫ", out)
         self.assertTrue(os.path.exists(os.path.join(целевой, "f.jpg")),
                         "при неготовых дисках нельзя трогать файлы")
+
+
+class TestQuarantineProvenance(unittest.TestCase):
+    """
+    Карантин обязан объяснять сам себя.
+
+    Он живёт неделями, а вопрос «откуда это и по какому решению» возникает
+    позже — когда файл решений уже переименован, перезаписан или удалён
+    из Загрузок. Журнал говорит, ЧТО перенесено, но не говорит, чем
+    это решение было принято.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.a = os.path.join(self.tmp, "a")
+        self.b = os.path.join(self.tmp, "b")
+        os.makedirs(self.a)
+        os.makedirs(self.b)
+        for d in (self.a, self.b):
+            with open(os.path.join(d, "f.jpg"), "wb") as fh:
+                fh.write(b"x" * 100)
+        self.dec = os.path.join(self.tmp, "решения_20260811.json")
+        with open(self.dec, "w", encoding="utf-8") as fh:
+            json.dump({"формат": "mmd2026-решения", "отчёт": "20260811-1234",
+                       "сохранено": "2026-08-11T10:00:00Z",
+                       "к_удалению": [
+                           {"rid": "exact:1:2", "id": 1,
+                            "путь": os.path.join(self.b, "f.jpg"),
+                            "байт": 100, "метод": "exact",
+                            "оставить": os.path.join(self.a, "f.jpg")}]},
+                      fh, ensure_ascii=False)
+
+    def tearDown(self):
+        import shutil as sh
+        sh.rmtree(self.tmp, ignore_errors=True)
+
+    def карантин(self):
+        for корень, _, файлы in os.walk(self.b):
+            if "journal.csv" in файлы:
+                return корень
+        return None
+
+    def test_рядом_с_журналом_лежит_происхождение(self):
+        out = run("04_apply.py", "--decisions", self.dec, "--move",
+                  "--root", f"a={self.a}", "--root", f"b={self.b}")
+        к = self.карантин()
+        self.assertIsNotNone(к, f"карантин не найден. Вывод:\n{out}")
+        инфо = os.path.join(к, "run_info.txt")
+        копия = os.path.join(к, "decisions.json")
+        self.assertTrue(os.path.isfile(инфо), "нет файла run_info.txt")
+        self.assertTrue(os.path.isfile(копия),
+                        "нет копии решений: исходный файл могут удалить")
+        with open(инфо, encoding="utf-8") as fh:
+            текст = fh.read()
+        for нужно in (os.path.basename(self.dec), "20260811-1234",
+                      "sha256", "--undo", "MMD-2026"):
+            self.assertIn(нужно, текст, f"в run_info.txt нет «{нужно}»")
+
+    def test_копия_решений_совпадает_с_исходной(self):
+        run("04_apply.py", "--decisions", self.dec, "--move",
+            "--root", f"a={self.a}", "--root", f"b={self.b}")
+        к = self.карантин()
+        with open(self.dec, encoding="utf-8") as fh:
+            было = json.load(fh)
+        with open(os.path.join(к, "decisions.json"), encoding="utf-8") as fh:
+            стало = json.load(fh)
+        self.assertEqual(было, стало)
+
+    def test_несколько_файлов_под_шаблоном_отвергаются(self):
+        # Оболочка раскрывает *.json в список; молча взять первый и бросить
+        # остальные — значит выполнить половину работы, не сказав об этом.
+        второй = os.path.join(self.tmp, "решения_20260812.json")
+        import shutil as sh
+        sh.copy(self.dec, второй)
+        out = run("04_apply.py", "--decisions", self.dec, второй, "--move",
+                  "--root", f"a={self.a}", "--root", f"b={self.b}")
+        self.assertIn("ПРОПУЩЕН", out)
+        self.assertIn(os.path.basename(второй), out)
+        self.assertTrue(os.path.isfile(os.path.join(self.b, "f.jpg")),
+                        "при неоднозначном вводе трогать файлы нельзя")
+
+    def test_файл_решений_назван_в_выводе(self):
+        out = run("04_apply.py", "--decisions", self.dec,
+                  "--root", f"a={self.a}", "--root", f"b={self.b}")
+        self.assertIn(os.path.basename(self.dec), out,
+                      "в предпросмотре не видно, какой файл решений разбирается")

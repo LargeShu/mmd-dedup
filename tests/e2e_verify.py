@@ -7,7 +7,7 @@ tests/e2e_decisions.js нажал кнопки в отчёте и записал
 на экране). После прогона 04_apply --move этот скрипт проверяет, что
 диск изменился ровно так, как обещал интерфейс.
 
-    python3 tests/e2e_verify.py ожидания.json решения.json
+    python3 tests/e2e_verify.py expect.json decisions.json
 
 Проверяется три вещи, и все три — про ШОВ между отчётом и исполнителем:
 
@@ -26,7 +26,7 @@ import sys
 
 def main():
     if len(sys.argv) != 3:
-        raise SystemExit("нужно: ожидания.json решения.json")
+        raise SystemExit("нужно: expect.json decisions.json")
     with open(sys.argv[1], encoding="utf-8") as fh:
         ожидания = json.load(fh)
     with open(sys.argv[2], encoding="utf-8") as fh:
