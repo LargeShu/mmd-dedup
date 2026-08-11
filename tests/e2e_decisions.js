@@ -11,13 +11,13 @@
 // и сверяет диск с ожиданиями.
 //
 // Запуск:
-//   node tests/e2e_decisions.js отчёт.html решения.json ожидания.json
+//   node tests/e2e_decisions.js report.html decisions.json expect.json
 
 const fs = require('fs');
 
 const [файлОтчёта, файлРешений, файлОжиданий] = process.argv.slice(2);
 if (!файлОтчёта || !файлРешений || !файлОжиданий) {
-  console.error('нужно: отчёт.html решения.json ожидания.json');
+  console.error('нужно: report.html decisions.json expect.json');
   process.exit(2);
 }
 
