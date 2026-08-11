@@ -134,6 +134,22 @@ Object.keys(state).forEach(k => delete state[k]);
     DATA.rows.filter(r => r.folder === f.f && byMethod(r)).length),
   'индекс вводился ради скорости и не должен менять результат');
 
+// ---------- «скрыть решённые» действительно скрывает
+//
+// Кнопка работала только при уже включённом фильтре: при снятом нажатие
+// не делало ничего, хотя название обещало действие.
+document.getElementById('onlyopen').checked = false;
+Object.keys(state).forEach(k => delete state[k]);
+setState(DATA.rows[0].rid, УДАЛИТЬ);
+скрытьРешённые();
+проверить('«скрыть решённые» включает фильтр сама',
+  document.getElementById('onlyopen').checked === true,
+  'иначе при снятом фильтре кнопка ничего не делает');
+проверить('решённая строка уходит из выборки',
+  !visibleRows(DATA.rows[0].folder, '', true)
+     .some(r => r.rid === DATA.rows[0].rid));
+Object.keys(state).forEach(k => delete state[k]);
+
 // ---------- пустая папка объясняет причину
 const папка = DATA.folders[0].f;
 const короб = { innerHTML: '', querySelector: () => ({ addEventListener() {} }) };

@@ -850,6 +850,18 @@ class TestApplyOutput(unittest.TestCase):
         self.assertNotIn("ИТОГ", out,
                          "предпросмотр ничего не переносил — итога быть не должно")
 
+    def test_после_переноса_напоминает_про_prune(self):
+        # Шаг, который пропускают чаще всего: база продолжает считать
+        # перенесённые файлы существующими, и следующий отчёт врёт.
+        out = self.запуск("--move")
+        self.assertIn("--prune", out)
+        self.assertIn("03_report.py", out)
+
+    def test_напоминания_нет_в_предпросмотре(self):
+        out = self.запуск()
+        self.assertNotIn("СЛЕДУЮЩИЙ ШАГ", out,
+                         "ничего не переносили — нечего и обновлять")
+
     def test_undo_подсказывает_папку_а_не_файл(self):
         out = self.запуск("--move")
         строка = [s for s in out.splitlines() if "--undo" in s][-1]

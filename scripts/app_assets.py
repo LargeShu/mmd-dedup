@@ -324,6 +324,20 @@ function загрузитьВид() {
   } catch (e) { /* оставляем умолчание */ }
 }
 
+// «Скрыть решённые» обязана скрывать решённые.
+//
+// Раньше она просто перерисовывала список, а прятал строки фильтр
+// «только неразобранные». При снятом фильтре нажатие не делало ничего:
+// кнопка обещала действие, которого не происходило. Теперь она сама
+// включает фильтр — это и есть то, о чём её просят.
+function скрытьРешённые() {
+  const ф = document.getElementById('onlyopen');
+  const было = ф.checked;
+  ф.checked = true;
+  renderFolders(true);
+  flash(было ? 'список обновлён' : 'включён фильтр «только неразобранные»');
+}
+
 function renderSort() {
   const sel = document.getElementById('sort');
   sel.innerHTML = Object.keys(СОРТИРОВКИ).map(k =>
@@ -750,10 +764,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('importfile').addEventListener('change', ev => {
     if (ev.target.files[0]) importJson(ev.target.files[0]);
   });
-  document.getElementById('hidedone').addEventListener('click', () => {
-    renderFolders(true);
-    flash('список обновлён');
-  });
+  document.getElementById('hidedone').addEventListener('click', скрытьРешённые);
   document.getElementById('expand').addEventListener('click', () => {
     DATA.folders.forEach(f => openFolders.add(f.f));
     renderFolders(true);
