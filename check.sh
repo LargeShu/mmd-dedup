@@ -177,6 +177,12 @@ mk("photo/A/deep/deeper/buried.jpg", 100, 80)
 mk("300/B/other.jpg", 120, 90)
 shutil.copy(f"{T}/photo/A/orig.jpg", f"{T}/300/B/copy.jpg")
 Image.open(f"{T}/photo/A/orig.jpg").resize((300,200)).save(f"{T}/300/B/small.jpg")
+# Ещё две независимые пары точных копий: сквозной сценарий должен уметь
+# задействовать все три вида решения на РАЗНЫХ файлах, иначе проверка
+# вырождается в один случай.
+for i in (1, 2):
+    mk(f"photo/A/pair{i}.jpg", 640, 480, {36867: f"2010:0{i}:01 10:00:00"})
+    shutil.copy(f"{T}/photo/A/pair{i}.jpg", f"{T}/300/B/pair{i}.jpg")
 PY
 DB="$T/t.db"; R="$T/rep"
 "$PY" scripts/01_inventory.py --db "$DB" --csv "$R/i.csv" --quiet \
@@ -307,7 +313,34 @@ STRAY=$(find reports -newermt "-5 minutes" -name "inventory_*.csv" 2>/dev/null |
 [ "$STRAY" = "0" ] && ok "reports/ проекта не тронут" \
   || bad "гейт создал $STRAY файлов в reports/ проекта"
 
-step "11. Документация не ссылается на файлы вне репозитория"
+step "11. Сквозная проверка: отчёт → решения → 04_apply"
+# Шов между интерфейсом и исполнителем. Обе стороны по отдельности были
+# зелёными, когда подсказка называла один файл, а удалялся другой.
+if command -v node >/dev/null 2>&1; then
+  if node tests/e2e_decisions.js "$R/decision.html" \
+       "$T/decisions.json" "$T/expect.json" >"$T/e2e1.txt" 2>&1; then
+    cat "$T/e2e1.txt"
+    "$PY" scripts/04_apply.py --decisions "$T/decisions.json" --move \
+      --root "photo=$T/photo" --root "300photos=$T/300" \
+      --quiet >"$T/e2e2.txt" 2>&1
+    if "$PY" tests/e2e_verify.py "$T/expect.json" "$T/decisions.json" \
+         >"$T/e2e3.txt" 2>&1; then
+      cat "$T/e2e3.txt"
+      ok "экран и исполнитель согласованы"
+    else
+      bad "экран обещает одно, 04_apply делает другое"
+      cat "$T/e2e3.txt"
+      tail -20 "$T/e2e2.txt"
+    fi
+  else
+    bad "не удалось выгрузить решения из отчёта"
+    tail -10 "$T/e2e1.txt"
+  fi
+else
+  echo "  node не установлен — сквозная проверка пропущена"
+fi
+
+step "12. Документация не ссылается на файлы вне репозитория"
 # У проекта есть локальные файлы (CONTRIBUTING.md, GITHUB_SETUP.md, LOCAL.md
 # и прочие) — они в .gitignore. Ссылка на них из отслеживаемого файла даёт
 # битую ссылку на GitHub, причём видит её только читатель, а не автор.
