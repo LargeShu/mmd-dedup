@@ -387,6 +387,10 @@ def main():
     ap.add_argument("--prune", action="store_true",
                     help="убрать из БАЗЫ записи о файлах, которых больше нет "
                          "на дисках (сами файлы не трогаются)")
+    ap.add_argument("--skip-mount-check", action="store_true",
+                    help="не проверять, подключены ли диски. Без проверки "
+                         "непримонтированная шара выглядит как пустая папка, "
+                         "и --prune вычистит инвентарь")
     ap.add_argument("--quiet", action="store_true")
     a = ap.parse_args()
 
@@ -408,6 +412,16 @@ def main():
             raise SystemExit(f"диск '{a.drive}' не найден. Есть: "
                              f"{', '.join(drives)}")
         drives = {a.drive: drives[a.drive]}
+
+    # Проверка ДО обхода. Непримонтированная шара выглядит как пустая
+    # локальная папка: обход честно нашёл бы ноль файлов, а --prune вычистил
+    # бы из инвентаря весь диск как «исчезнувший». Тихая потеря карты архива.
+    # --prune удаляет из инвентаря то, чего не нашёл на диске. На пустом
+    # каталоге это вычистило бы карту всего архива, поэтому там строже.
+    if not L.сообщить_о_дисках(drives, строго=a.prune) and not a.skip_mount_check:
+        raise SystemExit(
+            "\nПодключите тома и повторите. Снять проверку: --skip-mount-check")
+    print()
 
     con = L.connect(db)
     L.init_db(con)

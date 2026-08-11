@@ -688,7 +688,8 @@ class TestApplySafety(unittest.TestCase):
                       self.файл(self.b, "f2.jpg")])
         qr = os.path.join(self.tmp, "qr")
         out = self.запуск("--move", "--quarantine", qr, "--verify-hash")
-        self.assertIn("перенесено 2", out)
+        # Формат итога менялся; проверяем факт, а не вёрстку строки
+        self.assertRegex(out, r"перенесено\s*:?\s*2\b")
         self.assertFalse(os.path.exists(os.path.join(self.b, "f0.jpg")))
         # Журнал лежит рядом с самим карантином, а карантин теперь свой
         # у каждого диска. --undo принимает и папку целиком.
@@ -794,3 +795,138 @@ class TestQuarantineOnSameVolume(unittest.TestCase):
         src = os.path.join(self.photo, "2014", "a.jpg")
         got = m.quarantine_path("/qr", src, self.photo)
         self.assertEqual(got, os.path.join("/qr", "2014", "a.jpg"))
+
+
+class TestApplyOutput(unittest.TestCase):
+    """
+    Прогон на сетевом диске идёт часами. Вывод обязан отвечать на три
+    вопроса, не заставляя листать простыню вверх: когда запустились,
+    с какой скоростью идём, чем кончилось.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.a = os.path.join(self.tmp, "a")
+        self.b = os.path.join(self.tmp, "b")
+        os.makedirs(self.a)
+        os.makedirs(self.b)
+        for d in (self.a, self.b):
+            for i in range(3):
+                with open(os.path.join(d, f"f{i}.jpg"), "wb") as fh:
+                    fh.write(b"x" * (100 + i))
+        self.dec = os.path.join(self.tmp, "d.json")
+        with open(self.dec, "w", encoding="utf-8") as fh:
+            json.dump({"формат": "mmd2026-решения", "отчёт": "t",
+                       "к_удалению": [
+                           {"rid": f"exact:{i}:{i}", "id": i,
+                            "путь": os.path.join(self.b, f"f{i}.jpg"),
+                            "байт": 100 + i, "метод": "exact",
+                            "оставить": os.path.join(self.a, f"f{i}.jpg")}
+                           for i in range(3)]}, fh, ensure_ascii=False)
+
+    def tearDown(self):
+        import shutil as sh
+        sh.rmtree(self.tmp, ignore_errors=True)
+
+    def запуск(self, *args):
+        return run("04_apply.py", "--decisions", self.dec,
+                   "--root", f"photo={self.a}", "--root", f"other={self.b}",
+                   *args)
+
+    def test_в_начале_печатается_время_запуска(self):
+        out = self.запуск()
+        self.assertIn("запуск:", out)
+        self.assertIn("MMD-2026 duplicate finder", out,
+                      "версия в выводе: иначе непонятно, чем прогон сделан")
+
+    def test_в_конце_есть_итог(self):
+        out = self.запуск("--move")
+        self.assertIn("ИТОГ", out)
+        for поле in ("перенесено", "время", "начало", "конец", "КАРАНТИН"):
+            self.assertIn(поле, out, f"в итоге нет поля «{поле}»")
+
+    def test_итога_нет_в_предпросмотре(self):
+        out = self.запуск()
+        self.assertNotIn("ИТОГ", out,
+                         "предпросмотр ничего не переносил — итога быть не должно")
+
+    def test_undo_подсказывает_папку_а_не_файл(self):
+        out = self.запуск("--move")
+        строка = [s for s in out.splitlines() if "--undo" in s][-1]
+        self.assertNotIn("journal.csv", строка,
+                         "--undo принимает папку карантина: журналов может "
+                         "быть несколько, и один из них забудут")
+
+
+class TestMountCheck(unittest.TestCase):
+    """
+    Непримонтированная сетевая шара выглядит как пустая локальная папка.
+
+    Дефект по следам реального прогона: карантин уехал на системный диск,
+    потому что проверка ограничивалась os.path.isdir. Тот же промах в этапе 1
+    страшнее: обход нашёл бы ноль файлов, а --prune вычистил бы инвентарь.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def tearDown(self):
+        import shutil as sh
+        sh.rmtree(self.tmp, ignore_errors=True)
+
+    def test_нет_каталога(self):
+        стоп, _ = mmdlib.проверить_диски({"photo": os.path.join(self.tmp, "нет")})
+        self.assertTrue(стоп)
+        self.assertIn("каталога нет", стоп[0])
+
+    def test_пустой_каталог_предупреждение_а_при_строго_отказ(self):
+        пустой = os.path.join(self.tmp, "Volumes_photo")
+        os.makedirs(пустой)
+        стоп, внимание = mmdlib.проверить_диски({"photo": пустой})
+        self.assertFalse(стоп, "пустой диск бывает законно — не повод отказывать")
+        self.assertIn("ПУСТ", внимание[0])
+        стоп, _ = mmdlib.проверить_диски({"photo": пустой}, строго=True)
+        self.assertTrue(стоп, "там, где файлы двигают, пустой диск — стоп")
+
+    def test_непустой_локальный_каталог_проходит(self):
+        норм = os.path.join(self.tmp, "архив")
+        os.makedirs(норм)
+        with open(os.path.join(норм, "a.jpg"), "wb") as fh:
+            fh.write(b"x")
+        стоп, внимание = mmdlib.проверить_диски({"photo": норм})
+        self.assertEqual((стоп, внимание), ([], []))
+
+    def test_точка_монтирования_поднимается_до_смены_тома(self):
+        # корень диска может лежать ВНУТРИ тома: /Volumes/video/300 Photos
+        глубоко = os.path.join(self.tmp, "video", "300 Photos")
+        os.makedirs(глубоко)
+        точка = mmdlib.точка_монтирования(глубоко)
+        self.assertEqual(точка, mmdlib.точка_монтирования(self.tmp),
+                         "точка монтирования у вложенной папки та же, что "
+                         "у тома целиком")
+
+    def test_описание_дисков_печатает_том_и_свободное(self):
+        строки = mmdlib.описание_дисков({"photo": self.tmp})
+        self.assertEqual(len(строки), 1)
+        self.assertIn("том", строки[0])
+        self.assertIn("свободно", строки[0])
+
+    def test_apply_отказывается_при_пустом_диске(self):
+        пустой = os.path.join(self.tmp, "Volumes_photo")
+        целевой = os.path.join(self.tmp, "b")
+        os.makedirs(пустой)
+        os.makedirs(целевой)
+        with open(os.path.join(целевой, "f.jpg"), "wb") as fh:
+            fh.write(b"x" * 10)
+        dec = os.path.join(self.tmp, "d.json")
+        with open(dec, "w", encoding="utf-8") as fh:
+            json.dump({"к_удалению": [
+                {"rid": "exact:1:2", "id": 1,
+                 "путь": os.path.join(целевой, "f.jpg"), "байт": 10,
+                 "метод": "exact", "оставить": os.path.join(пустой, "f.jpg")}
+            ]}, fh, ensure_ascii=False)
+        out = run("04_apply.py", "--decisions", dec, "--move",
+                  "--root", f"photo={пустой}", "--root", f"other={целевой}")
+        self.assertIn("ДИСКИ НЕ ГОТОВЫ", out)
+        self.assertTrue(os.path.exists(os.path.join(целевой, "f.jpg")),
+                        "при неготовых дисках нельзя трогать файлы")
