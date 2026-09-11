@@ -38,6 +38,11 @@ LOCAL.md
 # Промежуточный план работ
 PLAN_02_signatures.md
 
+# Рабочие документы владельца: план, состояние, задачи
+PLN-*.md
+STATE.md
+TASKS.md
+
 # Окружение Python
 scripts/.venv/
 __pycache__/
