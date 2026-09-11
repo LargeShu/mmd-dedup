@@ -782,6 +782,7 @@ python3 scripts/01_inventory.py --version   # версия у любого ск�
 ```
 .
 ├── README.md                этот файл
+├── CLAUDE.md                правила проекта для агента
 ├── ALGORITHM.md             как устроен поиск дубликатов
 ├── DEVELOPMENT.md           правила проекта и логика скриптов
 ├── QUALITY_GATE.md          проверки качества и security review
