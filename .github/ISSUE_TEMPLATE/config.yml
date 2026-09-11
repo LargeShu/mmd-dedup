@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Правила участия
+    url: https://github.com/LargeShu/mmd-dedup/blob/main/CONTRIBUTING.md
+    about: Что приложить к сообщению, чего не прикладывать, как устроены ветки и PR.
+  - name: Как устроен поиск дубликатов
+    url: https://github.com/LargeShu/mmd-dedup/blob/main/ALGORITHM.md
+    about: Прежде чем сообщать о странной группировке — три способа поиска и их границы.
+  - name: Что уже известно и не проверено
+    url: https://github.com/LargeShu/mmd-dedup/blob/main/QUALITY_GATE.md
+    about: Разбор пойманных дефектов и список областей, которые не проверялись.

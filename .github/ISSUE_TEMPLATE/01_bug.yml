@@ -1,0 +1,102 @@
+name: Ошибка в работе
+description: Скрипт упал, посчитал не то или повёл себя не так, как описано
+labels: ["баг"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Не прикладывайте файлы из `reports/` и `config.json`.**
+        В `decision.html` и CSV лежат полные пути ко всем файлам вашего
+        архива, а часто и превью снимков. Если нужен фрагмент вывода —
+        замените пути на условные перед вставкой.
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия
+      description: Вывод `scripts/.venv/bin/python scripts/01_inventory.py --version`
+      placeholder: "1.7.3 (схема базы 7)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Операционная система
+      options:
+        - macOS
+        - Linux
+        - Windows
+        - другое
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Версия Python
+      placeholder: "3.11.9"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Где это случилось
+      options:
+        - 00_find_original — точечный поиск
+        - 01_inventory — карта архива
+        - 02_signatures — отпечатки
+        - 03_report — отчёты
+        - 04_apply — исполнение решений
+        - decision.html — работа с отчётом в браузере
+        - check.sh — набор проверок
+        - установка, setup.sh
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: Команда
+      description: Целиком, как запускали. Пути можно заменить на условные.
+      render: bash
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Что должно было произойти
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Что произошло
+      description: Вывод в консоль, сообщение об ошибке, трассировка.
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Воспроизведение на синтетическом стенде
+      description: >
+        Если удалось повторить на нескольких созданных скриптом картинках
+        вместо настоящего архива — опишите стенд. Такие сообщения разбираются
+        быстрее всех. Пример стенда — шаг 6 в check.sh.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Перед отправкой
+      options:
+        - label: В тексте нет путей к моим файлам, отчётов из reports/ и config.json
+          required: true
+        - label: Проверил на актуальной версии ветки main
+          required: false

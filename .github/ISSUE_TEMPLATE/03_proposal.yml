@@ -1,0 +1,58 @@
+name: Предложение изменения
+description: Идея, как инструмент должен работать иначе
+labels: ["предложение"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Заводите такое обсуждение **до** того, как писать код: направление
+        может быть уже отклонено по причине, которой не видно из исходников.
+        Список того, что почти наверняка не примут, — в разделе «Предложить
+        изменение» файла CONTRIBUTING.md.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу это решает
+      description: >
+        Опишите затруднение, а не готовое решение. «Не вижу, сколько места
+        освободится по конкретной папке» — задача. «Добавить колонку» — уже
+        решение, и оно может оказаться не единственным.
+    validations:
+      required: true
+
+  - type: textarea
+    id: now
+    attributes:
+      label: Как справляетесь сейчас
+      description: Обходной путь, если он есть, и чем он неудобен.
+    validations:
+      required: false
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Что предлагаете
+    validations:
+      required: true
+
+  - type: textarea
+    id: scale
+    attributes:
+      label: Размер архива, на котором это важно
+      description: Порядок числа файлов и объёма — без имён папок и путей.
+      placeholder: "около 120 тысяч файлов, 500 ГБ, два диска"
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Границы проекта
+      options:
+        - label: Предложение не требует прописывать пути в коде
+          required: true
+        - label: Предложение не даёт инструменту удалять файлы без решения человека
+          required: true
+        - label: Готов прислать реализацию сам, если направление подойдёт
+          required: false

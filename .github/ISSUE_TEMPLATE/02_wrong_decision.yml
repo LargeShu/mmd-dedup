@@ -1,0 +1,84 @@
+name: Предложил удалить нужный файл
+description: Инструмент назвал дублем то, что дублем не является, или выбрал не тот файл как оригинал
+labels: ["баг", "ошибочное решение"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Это самая важная категория: цена такой ошибки — снимок, который негде
+        взять заново. Такие сообщения разбираются в первую очередь.
+
+        **Не прикладывайте `decision.html` и CSV из `reports/`** — там полные
+        пути ко всему вашему архиву. Нужные строки перенесите сюда руками,
+        заменив пути на условные.
+
+  - type: input
+    id: version
+    attributes:
+      label: Версия
+      placeholder: "1.7.3 (схема базы 7)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: method
+    attributes:
+      label: Каким способом файлы попали в одну группу
+      description: Метка стоит рядом с парой в отчёте и в колонке «метод» в CSV.
+      options:
+        - exact — точные копии
+        - exif — один кадр в разных версиях
+        - phash — визуально похожие
+        - не знаю
+    validations:
+      required: true
+
+  - type: dropdown
+    id: kind
+    attributes:
+      label: В чём ошибка
+      options:
+        - разные кадры попали в одну группу
+        - оригиналом выбран не тот файл
+        - к удалению предложены обе стороны пары
+        - нужный файл пропал после 04_apply
+    validations:
+      required: true
+
+  - type: textarea
+    id: pair
+    attributes:
+      label: Чем файлы отличались
+      description: >
+        Размер, разрешение, дата съёмки, камера, имя — по каждому файлу пары.
+        Пути замените на условные: «архив/2008/кадр_A.jpg».
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Почему решение неверно
+      description: Что именно инструмент не учёл — как вы это видите.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reason
+    attributes:
+      label: Обоснование из отчёта
+      description: >
+        Строка вида «EXIF сохранён (2008-08-14), разрешение 1600x1200,
+        наибольший размер» — она показывает, по какому признаку сделан выбор.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Перед отправкой
+      options:
+        - label: Пути обезличены, файлы из reports/ не приложены
+          required: true
