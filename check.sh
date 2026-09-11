@@ -341,7 +341,7 @@ else
 fi
 
 step "12. Документация не ссылается на файлы вне репозитория"
-# У проекта есть локальные файлы (CONTRIBUTING.md, GITHUB_SETUP.md, LOCAL.md
+# У проекта есть локальные файлы (GIT_LOCAL.md, GITHUB_SETUP.md, LOCAL.md
 # и прочие) — они в .gitignore. Ссылка на них из отслеживаемого файла даёт
 # битую ссылку на GitHub, причём видит её только читатель, а не автор.
 if command -v git >/dev/null 2>&1 && git rev-parse --git-dir >/dev/null 2>&1; then

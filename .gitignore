@@ -6,7 +6,7 @@ config.json
 data/
 reports/
 quarantine/
-
+Claude outputs/
 # Архивы для передачи собираются pack.sh
 *.tar.gz
 
@@ -29,14 +29,19 @@ pack.sh
 # Использованы как источник при выборе порога phash, но публиковать их нельзя
 NEAR_DUPLICATE_THUMBNAIL.md
 
-# Склеротичка
-CONTRIBUTING.md
+# Склеротичка: личная памятка по работе с этим репозиторием
+GIT_LOCAL.md
 
 # Заметки по этой установке: пути, замеры, разбор частых странностей
 LOCAL.md
 
 # Промежуточный план работ
 PLAN_02_signatures.md
+
+# Рабочие документы владельца: план, состояние, задачи
+PLN-*.md
+STATE.md
+TASKS.md
 
 # Окружение Python
 scripts/.venv/
