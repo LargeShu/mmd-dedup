@@ -886,7 +886,9 @@ python3 scripts/01_inventory.py --version   # версия у любого ск�
 ├── tests/
 │   ├── test_unit.py         чистые функции
 │   ├── test_regress.py      по тесту на каждый пойманный дефект
-│   └── test_app.js          логика интерактивного отчёта (нужен node)
+│   ├── test_app.js          логика интерактивного отчёта (нужен node)
+│   ├── e2e_decisions.js     готовит файл решений для сквозной проверки
+│   └── e2e_verify.py        сверяет, что 04_apply сделал ровно отмеченное
 ├── docs/screenshots/        снимки отчёта для README
 ├── data/inventory.db        создаётся этапом 1
 ├── reports/                 отчёты
