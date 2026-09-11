@@ -771,6 +771,9 @@ copy config.example.json config.json
 Контроль качества: статический анализ, тесты, security review —
 в [QUALITY_GATE.md](QUALITY_GATE.md).
 
+Как присылать исправления: ветки, коммиты, PR, что не примут и почему —
+в [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ```bash
 python3 scripts/01_inventory.py --version   # версия у любого скрипта
 ./check.sh          # весь набор проверок, около минуты
@@ -783,6 +786,7 @@ python3 scripts/01_inventory.py --version   # версия у любого ск�
 .
 ├── README.md                этот файл
 ├── CLAUDE.md                правила проекта для агента
+├── CONTRIBUTING.md          как присылать исправления
 ├── ALGORITHM.md             как устроен поиск дубликатов
 ├── DEVELOPMENT.md           правила проекта и логика скриптов
 ├── QUALITY_GATE.md          проверки качества и security review
